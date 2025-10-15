@@ -33,7 +33,7 @@ public static class MappingsManager
 
         using var client = new RestClient();
 
-        var request = new RestRequest("https://fortnitecentral.genxgames.gg/api/v1/mappings", Method.Get)
+        var request = new RestRequest("https://uedb.dev/svc/api/v1/fortnite/mappings", Method.Get)
         {
             Timeout = TimeSpan.FromMilliseconds(3 * 1000)
         };
@@ -42,7 +42,7 @@ public static class MappingsManager
 
         if (!response.IsSuccessful || string.IsNullOrEmpty(response.Content))
         {
-            Log.Error("Request to FortniteCentral for mappings failed.");
+            Log.Error("Request to UEDB for mappings failed.");
 
             return TryFindSavedMappings(out mappingsPath);
         }
@@ -50,37 +50,34 @@ public static class MappingsManager
         using var doc = JsonDocument.Parse(response.Content);
         var root = doc.RootElement;
 
-        if (root.GetArrayLength() <= 0) return false;
-
-        foreach (var mappings in root.EnumerateArray())
-        {
-            if (!mappings.TryGetProperty("fileName", out var fileName) ||
-                !mappings.TryGetProperty("url", out var url))
-            {
-                continue;
-            }
-
-            mappingsPath = Path.Join(DirectoryManager.MappingsDir, fileName.GetString());
-
-            if (File.Exists(mappingsPath))
-            {
-                return true;
-            }
-
-            var mappingsData = client.DownloadData(new(url.GetString()));
-
-            if (mappingsData is null || mappingsData.Length <= 0)
-            {
-                Log.Error("Mappings data downloaded from FortniteCentral is null.");
-
-                return TryFindSavedMappings(out mappingsPath);
-            }
-
-            File.WriteAllBytes(mappingsPath, mappingsData);
-
-            return true;
-        }
-
-        return false;
+        if (!root.TryGetProperty("version", out var versionProp) ||
+			!root.TryGetProperty("mappings", out var mappingsProp) ||
+			!mappingsProp.TryGetProperty("ZStandard", out var zstdUrlProp))
+		{
+			Log.Error("Invalid mapping format or missing ZStandard URL.");
+			return TryFindSavedMappings(out mappingsPath);
+		}
+		
+		var version = versionProp.GetString();
+		var zstdUrl = zstdUrlProp.GetString();
+		var fileName = Path.GetFileName(new Uri(zstdUrl).LocalPath);
+		
+		mappingsPath = Path.Join(DirectoryManager.MappingsDir, fileName);
+		
+		if (File.Exists(mappingsPath))
+		{
+			return true;
+		}
+		
+		var mappingsData = client.DownloadData(new(zstdUrl));
+		
+		if (mappingsData is null || mappingsData.Length <= 0)
+		{
+			Log.Error("Mappings data downloaded from UEDB is null.");
+			return TryFindSavedMappings(out mappingsPath);
+		}
+		
+		File.WriteAllBytes(mappingsPath, mappingsData);
+		return true;
     }
 }
